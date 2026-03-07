@@ -332,7 +332,8 @@ def do_benchmark (args_dict, full_filename):
             completed_process2 = run_command (command2, fd)
             passed = completed_process2 is not None and \
                 completed_process2.returncode == 0 and \
-                not completed_process2.stdout.endswith ("FAIL 1")
+                (completed_process2.stdout is None or \
+                 not completed_process2.stdout.endswith ("FAIL 1"))
         else:
             passed = False
 
