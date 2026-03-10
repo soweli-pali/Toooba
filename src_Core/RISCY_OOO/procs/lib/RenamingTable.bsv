@@ -94,9 +94,16 @@ typedef struct {
     SpecTag specTag;
 } RTWrongSpec deriving(Bits, Eq, FShow);
 
+// entries in the move alias table
+typedef struct {
+    PhyRIndx dst;
+    PhyRIndx src;
+} MoveAlias deriving(Bits, Eq, FShow);
+
 (* synthesize *)
 module mkRegRenamingTable(RegRenamingTable) provisos (
     NumAlias#(size, TSub#(NumPhyReg, NumArchReg)),
+    NumAlias#(moveTableSize, 3),
     Alias#(indexT, Bit#(TLog#(size))),
     Alias#(vTagT, Bit#(TLog#(TMul#(2, size)))) // virtual tag: 0 -- size*2-1
 );
@@ -162,6 +169,36 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     // wrong spec conflict with rename
     Vector#(SupSize, RWire#(void)) wrongSpec_rename_conflict <- replicateM(mkRWire);
+
+    // move table
+    // store dst in renaming table and in-flight fifo as normal
+    // when query would otherwise return PhyRIndx dst, instead return src
+    // if we free src instead:
+    // 1. replace dst with src wherever it previously occured
+    // 2. free dst
+    // and whenever we free dst (including above) we remove move table entry
+    Vector#(moveTableSize, Reg#(MoveAlias)) move_table <- replicateM(mkRegU);
+    Vector#(moveTableSize, Reg#(Bool)) move_valid <- replicateM(mkReg(False));
+
+    function Maybe#(PhyRIndx) getMoveSource(PhyRIndx dst);
+        Maybe#(PhyRIndx) result = Invalid;
+        for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin
+            if(move_valid[i] && move_table[i].dst == dst) begin 
+                result = Valid (move_table[i].src)
+            end
+        end
+        return result;
+    endfunction
+
+    function Action freeMove(PhyRIndx dst);
+        action
+            for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin
+                if(move_valid[i] && move_table[i].dst == dst) begin 
+                    move_valid[i] <= False;
+                end
+            end
+        endaction
+    endfunction
 
     function indexT getNextIndex(indexT idx);
         return idx == fromInteger(valueof(size) - 1) ? 0 : idx + 1;
