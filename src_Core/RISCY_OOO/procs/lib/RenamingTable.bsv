@@ -115,8 +115,8 @@ typedef struct {
 } MoveUpdate#(type moveIndexT, type locationT) deriving(Bits, Eq, FShow);
 
 typedef union tagged {
-    rtIndexT rtIndx;
-    indexT inFlightIndx;
+    rtIndexT RtIndx;
+    indexT InFlightIndx;
 } LocationT#(type rtIndexT, type indexT) deriving(Bits, Eq, FShow);
 
 (* synthesize *)
@@ -282,7 +282,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(phyReplaceEn[i].wget() matches tagged valid .r) begin 
                 case(r.location) matches 
-                    tagged rtIndx .idx: begin 
+                    tagged RtIndx .idx: begin 
                         // sanity check
                         assert(!rtReplaced[idx], "Move substitution must not replace the same location in rename table twice in one cycle")
                         if(!rtReplaced[idx]) begin 
@@ -290,7 +290,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                             rtReplaced[idx] = True;
                         end
                     end 
-                    tagged inFlightIndx .idx begin 
+                    tagged InFlightIndx .idx begin 
                         // sanity check
                         assert(!inFlightReplaced[idx], "Move substitution must not replace the same location in in flight renaming table twice in one cycle")
                         if(!inFlightReplaced[idx]) begin 
@@ -483,7 +483,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     if(getMoveIdxByDst(commit_phy_reg, i) matches tagged Valid .idx) begin 
                         dstLocationUpdateEn[i].wset(moveUpdate {
                             moveTableIndex: idx,
-                            newLocation: tagged rtIndx rtIdx,
+                            newLocation: tagged RtIndx rtIdx,
                         })
                     end
                     // if dst freed then free move table entry
@@ -554,7 +554,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                                 dst: new_renamings_phy[curEnqP][nrp_get_port],
                                 src: claim.phy,
                             },
-                            location: tagged inFlightIndx curEnqP,
+                            location: tagged InFlightIndx curEnqP,
                         })
                     end
                     // sanity check
