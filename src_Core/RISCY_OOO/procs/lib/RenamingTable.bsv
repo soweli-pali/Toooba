@@ -123,8 +123,8 @@ typedef union tagged {
 module mkRegRenamingTable(RegRenamingTable) provisos (
     NumAlias#(size, TSub#(NumPhyReg, NumArchReg)),
     NumAlias#(moveTableSize, 3),
-    Alias#(moveCountT, Bit#(TLog#(TAdd#(moveTableSize, 1))))
-    Alias#(moveIndexT, Bit#(TLog#(moveTableSize)))
+    Alias#(moveCountT, Bit#(TLog#(TAdd#(moveTableSize, 1)))),
+    Alias#(moveIndexT, Bit#(TLog#(moveTableSize))),
     Alias#(indexT, Bit#(TLog#(size))),
     Alias#(rtIndexT, Bit#(TLog#(NumArchReg))),
     Alias#(locationT, LocationT#(rtIndexT, indexT)),
