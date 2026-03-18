@@ -180,8 +180,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // XXX A valid in-flight renaming may have arch reg being invalid
     // This happens in case we claim a phy reg while the dst arch reg is invalid
     Vector#(size, Reg#(Maybe#(ArchRIndx))) new_renamings_arch <- replicateM(mkRegU);
-    function m#(Reg#(PhyRIndx)) genNewRenamingsPhy(Integer i) provisos (IsModule#(m, a__));
-        return mkReg(fromInteger(i + valueOf(NumArchReg))); // free phy regs initially
+    function m#(Ehr#(2, PhyRIndx)) genNewRenamingsPhy(Integer i) provisos (IsModule#(m, a__));
+        return mkEhr(fromInteger(i + valueOf(NumArchReg))); // free phy regs initially
     endfunction
     Vector#(size, Ehr#(2, PhyRIndx)) new_renamings_phy <- genWithM(genNewRenamingsPhy);
     Vector#(size, Ehr#(2, Bool)) valid <- replicateM(mkEhr(False));
@@ -211,37 +211,39 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // dst may only appear in the table once
     // src can appear multiple times
     // ehr ports above 0 only used for writes
-    Vector#(moveTableSize, Reg#(MoveAlias)) move_table <- replicateM(mkEhr(0));
-    Vector#(moveTableSize, Reg#(locationT)) move_dst_locations <- replicateM(mkEhr(0));
+    Vector#(moveTableSize, Reg#(MoveAlias)) move_table <- replicateM(mkRegU);
+    Vector#(moveTableSize, Reg#(locationT)) move_dst_locations <- replicateM(mkRegU);
     Vector#(moveTableSize, Reg#(Bool)) move_valid <- replicateM(mkReg(False));
 
-    Vector#(SupSize, RWire#(moveIndexT)) freeMoveEn <- replicateM(ukUnsafeRWire);
-    Vector#(SupSize, RWire#(moveClaim)) allocateMoveEn <- replicateM(ukUnsafeRWire);
-    Vector#(SupSize, RWire#(moveUpdate)) dstLocationUpdateEn <- replicateM(ukUnsafeRWire);
+    Vector#(SupSize, RWire#(moveIndexT)) freeMoveEn <- replicateM(mkUnsafeRWire);
+    Vector#(SupSize, RWire#(moveClaim)) allocateMoveEn <- replicateM(mkUnsafeRWire);
+    Vector#(SupSize, RWire#(moveUpdate)) dstLocationUpdateEn <- replicateM(mkUnsafeRWire);
     // replace enqueued when src would otherwise be freed
-    Vector#(SupSize, RWire#(MoveAlias)) phyReplaceEn <- replicateM(ukUnsafeRWire);
+    Vector#(SupSize, RWire#(MoveAlias)) phyReplaceEn <- replicateM(mkUnsafeRWire);
 
     function PhyRIndx applyPriorReplacements(PhyRIndx phy, Integer idx);
         PhyRIndx result = phy;
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(idx > i && phyReplaceEn[i].wget() matches tagged Valid .m) begin 
-                if(m.dst == phy) begin 
-                    result = m.src;
+            if(idx > i) begin 
+                if(phyReplaceEn[i].wget() matches tagged Valid .m) begin 
+                    if(m.dst == phy) begin 
+                        result = m.src;
+                    end
                 end
             end
         end
         return result;
     endfunction
 
-    Ehr#(TAdd#(SupSize, 1), moveCountT) free_move_slots <- mkEhr(fromInteger(moveTableSize));
+    Ehr#(TAdd#(SupSize, 1), moveCountT) free_move_slots <- mkEhr(fromInteger(valueof(moveTableSize)));
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule allocate_to_move_table();
+    rule allocate_to_move_table;
         // apply allocations
         // assume allocations are already flattened
         Vector#(moveTableSize, Bool) allocated = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(allocateMoveEn[i].wget() matches tagged valid .mc) begin 
+            if(allocateMoveEn[i].wget() matches tagged Valid .mc) begin 
                 Bool allocation_done = False;
                 for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin
                     if(!allocation_done && !move_valid[j] && !allocated[j]) begin 
@@ -253,20 +255,20 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     end
                 end
                 // sanity check
-                assert(allocation_done, "All scheduled allocations must have a slot available")
+                doAssert(allocation_done, "All scheduled allocations must have a slot available");
             end
         end
     endrule
 
         (* fire_when_enabled, no_implicit_conditions *)
-    rule free_from_move_table();
+    rule free_from_move_table;
         // apply frees
         Vector#(moveTableSize, Bool) freed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(freeMoveEn[i].wget() matches tagged valid .idx) begin 
+            if(freeMoveEn[i].wget() matches tagged Valid .idx) begin 
                 // sanity checks
-                assert(!freed[idx], "Must not free the same move table index twice in the same cycle");
-                assert(move_valid[idx], "Freed move index must be valid");
+                doAssert(!freed[idx], "Must not free the same move table index twice in the same cycle");
+                doAssert(move_valid[idx], "Freed move index must be valid");
                 if(!freed[idx] && move_valid[idx]) begin 
                     move_valid[idx] <= False;
                     freed[idx] = True;
@@ -276,23 +278,23 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule apply_replacements();
+    rule apply_replacements;
         Vector#(size, Bool) inFlightReplaced = replicate(False);
-        Vector#(num_arch_regs, Bool) rtReplaced = replicate(False);
+        Vector#(NumArchReg, Bool) rtReplaced = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(phyReplaceEn[i].wget() matches tagged valid .r) begin 
-                case(r.location) matches 
+            if(phyReplaceEn[i].wget() matches tagged Valid .r) begin 
+                case(r.newLocation) matches 
                     tagged RtIndx .idx: begin 
                         // sanity check
-                        assert(!rtReplaced[idx], "Move substitution must not replace the same location in rename table twice in one cycle")
+                        doAssert(!rtReplaced[idx], "Move substitution must not replace the same location in rename table twice in one cycle");
                         if(!rtReplaced[idx]) begin 
                             renamingTable[idx][rt_replace_port] <= r.new_phy;
                             rtReplaced[idx] = True;
                         end
                     end 
-                    tagged InFlightIndx .idx begin 
+                    tagged InFlightIndx .idx: begin 
                         // sanity check
-                        assert(!inFlightReplaced[idx], "Move substitution must not replace the same location in in flight renaming table twice in one cycle")
+                        doAssert(!inFlightReplaced[idx], "Move substitution must not replace the same location in in flight renaming table twice in one cycle");
                         if(!inFlightReplaced[idx]) begin 
                             new_renamings_phy[idx][nrp_replace_port] <= r.new_phy;
                             inFlightReplaced[idx] = True;
@@ -304,14 +306,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule update_dst_locations();
+    rule update_dst_locations;
         Vector#(moveTableSize, Bool) updated = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(dstLocationUpdateEn[i].wget() matches tagged valid .lu) begin 
+            if(dstLocationUpdateEn[i].wget() matches tagged Valid .lu) begin 
                 // sanity checks
                 moveIndexT idx = lu.moveTableIdx;
-                assert(move_valid[idx], "Move table index being updated must be valid")
-                assert(!updated[idx], "Move table dst location must only be updated once")
+                doAssert(move_valid[idx], "Move table index being updated must be valid");
+                doAssert(!updated[idx], "Move table dst location must only be updated once");
                 if(!updated[idx] && move_valid[idx]) begin 
                     move_dst_locations[idx] <= lu.newLocation;
                     updated[idx] = True;
@@ -341,7 +343,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 && !isMoveIndexFreed(fromInteger(i), portIdx)
                 && move_table[i].src == src
             ) begin 
-                result = Valid fromInteger(i);
+                result = Valid (fromInteger(i));
                 result_found = True;
             end
         end
@@ -357,7 +359,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 && !isMoveIndexFreed(fromInteger(i), portIdx)
                 && move_table[i].dst == dst
             ) begin 
-                result = Valid fromInteger(i);
+                result = Valid (fromInteger(i));
                 result_found = True;
             end
         end
@@ -371,7 +373,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         Maybe#(PhyRIndx) result = Invalid;
         for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin
             if(move_valid[i][mt_read_port] && move_table[i][mt_read_port].dst == dst) begin 
-                result = Valid (move_table[i].src)
+                result = Valid (move_table[i].src);
             end
         end
         return result;
@@ -467,7 +469,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     freed_phy_reg = applyPriorReplacements(freed_phy_reg, i);
                     // if freed_phy_reg is src then instead free dst
                     if(getMoveIdxBySource(freed_phy_reg, i) matches tagged Valid .idx) begin 
-                        MoveAlias move = moveTable[i];
+                        MoveAlias move = move_table[i];
                         freed_phy_reg = move.dst;
                         // replace prior occurance of dst with src
                         phyReplaceEn[i].wset(move);
@@ -481,10 +483,10 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
                     // update dstLocation
                     if(getMoveIdxByDst(commit_phy_reg, i) matches tagged Valid .idx) begin 
-                        dstLocationUpdateEn[i].wset(moveUpdate {
+                        dstLocationUpdateEn[i].wset(MoveUpdate {
                             moveTableIndex: idx,
-                            newLocation: tagged RtIndx rtIdx,
-                        })
+                            newLocation: tagged RtIndx rtIdx
+                        });
                     end
                     // if dst freed then free move table entry
                     if(getMoveIdxByDst(freed_phy_reg, i) matches tagged Valid .idx) begin 
@@ -549,13 +551,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
                     if(claim.isMove) begin 
-                        allocateMoveEn[i].wset(moveClaim {
+                        allocateMoveEn[i].wset(MoveClaim {
                             move: MoveAlias {
                                 dst: new_renamings_phy[curEnqP][nrp_get_port],
-                                src: claim.phy,
+                                src: claim.phy
                             },
-                            location: tagged InFlightIndx curEnqP,
-                        })
+                            dstLocation: tagged InFlightIndx curEnqP
+                        });
                     end
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
@@ -652,7 +654,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         let new_phy_reg = search_new_src_renamings(arch_reg);
         let existing_phy_reg = renaming_table[getRTIndex(arch_reg)][rt_get_port];
         PhyRIndx result = fromMaybe(fromMaybe(existing_phy_reg, new_phy_reg), claim_phy_reg);
-        return fromMaybe(getMoveSource(result), result);
+        return fromMaybe(result, getMoveSource(result));
     endfunction
 
     // function to find a free phy reg to claim (at port claimPort) for a dst arch reg
@@ -718,7 +720,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     Vector#(SupSize, RTMove) moveIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        Bool guard = !valid[renamingsClaimIndex[i]][valid_get_port] && free_move_slots[i] > 0;
+        Bool guard = !valid[claimIndex[i]][valid_get_port] && free_move_slots[i] > 0;
         moveIfc[i] = (interface RTMove;
             method RenameResult getMoveResult(Move m, ArchRegs r) if(guard);
                 // get renamings
