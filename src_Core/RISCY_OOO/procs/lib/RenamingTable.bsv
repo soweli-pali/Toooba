@@ -288,7 +288,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                         // sanity check
                         doAssert(!rtReplaced[idx], "Move substitution must not replace the same location in rename table twice in one cycle");
                         if(!rtReplaced[idx]) begin 
-                            renamingTable[idx][rt_replace_port] <= mc.move.src;
+                            renaming_table[idx][rt_replace_port] <= mc.move.src;
                             rtReplaced[idx] = True;
                         end
                     end 
@@ -311,7 +311,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(dstLocationUpdateEn[i].wget() matches tagged Valid .lu) begin 
                 // sanity checks
-                moveIndexT idx = lu.moveTableIdx;
+                moveIndexT idx = lu.moveTableIndex;
                 doAssert(move_valid[idx], "Move table index being updated must be valid");
                 doAssert(!updated[idx], "Move table dst location must only be updated once");
                 if(!updated[idx] && move_valid[idx]) begin 
@@ -326,7 +326,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         Bool result = False;
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(i < portIdx) begin 
-                if(freeMoveEn[i] matches tagged Valid .freed_idx) begin 
+                if(freeMoveEn[i].wget() matches tagged Valid .freed_idx) begin 
                     result = result || idx == freed_idx;
                 end
             end
@@ -372,7 +372,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     function Maybe#(PhyRIndx) getMoveSource(PhyRIndx dst);
         Maybe#(PhyRIndx) result = Invalid;
         for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin
-            if(move_valid[i][mt_read_port] && move_table[i][mt_read_port].dst == dst) begin 
+            if(move_valid[i] && move_table[i].dst == dst) begin 
                 result = Valid (move_table[i].src);
             end
         end
@@ -392,7 +392,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     endfunction
 
     // get the index to query renaming_table
-    function rtIndxT getRTIndex(ArchRIndx arch) = pack(arch);
+    function rtIndexT getRTIndex(ArchRIndx arch) = pack(arch);
 
     // vector of index to claim free phy regs for each rename port
     Vector#(SupSize, indexT) claimIndex;
@@ -473,7 +473,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                         freed_phy_reg = move.dst;
                         // replace prior occurance of dst with src
                         phyReplaceEn[i].wset(MoveClaim {
-                            move: move 
+                            move: move,
                             dstLocation: move_dst_locations[i]});
                         // free move table entry
                         freeMoveEn[i].wset(idx);
@@ -708,7 +708,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 claimEn[i].wset(RenameClaim {
                     arch: r.dst,
                     phy: claim_phy_reg,
-                    specBits: sb
+                    specBits: sb,
+                    isMove: False
                 });
                 // conflict with wrong spec
                 wrongSpec_rename_conflict[i].wset(?);
