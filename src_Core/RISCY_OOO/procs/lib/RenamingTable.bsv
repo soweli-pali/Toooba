@@ -219,15 +219,15 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(SupSize, RWire#(moveClaim)) allocateMoveEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(moveUpdate)) dstLocationUpdateEn <- replicateM(mkUnsafeRWire);
     // replace enqueued when src would otherwise be freed
-    Vector#(SupSize, RWire#(MoveAlias)) phyReplaceEn <- replicateM(mkUnsafeRWire);
+    Vector#(SupSize, RWire#(moveClaim)) phyReplaceEn <- replicateM(mkUnsafeRWire);
 
     function PhyRIndx applyPriorReplacements(PhyRIndx phy, Integer idx);
         PhyRIndx result = phy;
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(idx > i) begin 
-                if(phyReplaceEn[i].wget() matches tagged Valid .m) begin 
-                    if(m.dst == phy) begin 
-                        result = m.src;
+                if(phyReplaceEn[i].wget() matches tagged Valid .mc) begin 
+                    if(mc.move.dst == phy) begin 
+                        result = mc.move.src;
                     end
                 end
             end
@@ -282,13 +282,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         Vector#(size, Bool) inFlightReplaced = replicate(False);
         Vector#(NumArchReg, Bool) rtReplaced = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            if(phyReplaceEn[i].wget() matches tagged Valid .r) begin 
-                case(r.newLocation) matches 
+            if(phyReplaceEn[i].wget() matches tagged Valid .mc) begin 
+                case(mc.dstLocation) matches 
                     tagged RtIndx .idx: begin 
                         // sanity check
                         doAssert(!rtReplaced[idx], "Move substitution must not replace the same location in rename table twice in one cycle");
                         if(!rtReplaced[idx]) begin 
-                            renamingTable[idx][rt_replace_port] <= r.new_phy;
+                            renamingTable[idx][rt_replace_port] <= mc.move.src;
                             rtReplaced[idx] = True;
                         end
                     end 
@@ -296,7 +296,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                         // sanity check
                         doAssert(!inFlightReplaced[idx], "Move substitution must not replace the same location in in flight renaming table twice in one cycle");
                         if(!inFlightReplaced[idx]) begin 
-                            new_renamings_phy[idx][nrp_replace_port] <= r.new_phy;
+                            new_renamings_phy[idx][nrp_replace_port] <= mc.move.src;
                             inFlightReplaced[idx] = True;
                         end
                     end
@@ -472,7 +472,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                         MoveAlias move = move_table[i];
                         freed_phy_reg = move.dst;
                         // replace prior occurance of dst with src
-                        phyReplaceEn[i].wset(move);
+                        phyReplaceEn[i].wset(MoveClaim {
+                            move: move 
+                            dstLocation: move_dst_locations[i]});
                         // free move table entry
                         freeMoveEn[i].wset(idx);
                     end
