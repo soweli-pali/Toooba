@@ -1075,7 +1075,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             tagged CapModify  .cm:  to_exec = True;
                         endcase
                         case (dInst.execFunc) matches
-                            tagged Alu .alu:        to_exec = True; // TODO You dont want this for effective move :)
+                            tagged Alu .alu:        to_exec = True;
                             tagged Br .br:          to_exec = True;
                             tagged MulDiv .muldiv:  to_FpuMulDiv = True;
                             tagged Fpu .fpu:        to_FpuMulDiv = True;
